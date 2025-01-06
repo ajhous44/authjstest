@@ -1,6 +1,5 @@
 import NextAuth from "next-auth";
 import { type NextAuthConfig } from "next-auth";
-import { ProxyAgent, fetch as undici } from "undici";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import type { MicrosoftEntraIDProfile } from "next-auth/providers/microsoft-entra-id";
 
@@ -18,23 +17,17 @@ async function proxyFetch(
     "Proxy called for URL:",
     args[0] instanceof Request ? args[0].url : args[0]
   );
-  const dispatcher = new ProxyAgent(proxyUrl!);
 
-  if (args[0] instanceof Request) {
-    const request = args[0];
-    // @ts-expect-error Undici types are different but compatible
-    const response = await undici(request.url, {
-      ...args[1],
-      method: request.method,
-      headers: request.headers as HeadersInit,
-      dispatcher,
-    });
-    return response as unknown as Response;
-  }
+  const [url, config] = args;
+  const fetchConfig = {
+    ...config,
+    headers: {
+      ...(config?.headers ?? {}),
+      'x-use-proxy': 'true',
+    },
+  };
 
-  // @ts-expect-error Undici types are different but compatible
-  const response = await undici(args[0], { ...(args[1] || {}), dispatcher });
-  return response as unknown as Response;
+  return fetch(url, fetchConfig);
 }
 
 /**
@@ -49,11 +42,9 @@ const createAzureADProvider = () => {
 
   // Step 1: Create the base provider
   const baseConfig = {
-    clientId: process.env.AZURE_AD_CLIENT_ID!,
-    clientSecret: process.env.AZURE_AD_CLIENT_SECRET!,
-    issuer: process.env.AZURE_AD_TENANT_ID 
-      ? `https://login.microsoftonline.com/${process.env.AZURE_AD_TENANT_ID}/v2.0`
-      : undefined,
+    clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID!,
+    clientSecret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET!,
+    issuer: process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER,
     authorization: {
       params: {
         scope: "openid profile email User.Read",
@@ -82,7 +73,7 @@ const createAzureADProvider = () => {
       const response = await proxyFetch(...args);
       const json = await response.clone().json();
       const tenantRe = /microsoftonline\.com\/(\w+)\/v2\.0/;
-      const tenantId = baseConfig.issuer?.match(tenantRe)?.[1] ?? "common";
+      const tenantId = process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER?.match(tenantRe)?.[1] ?? "common";
       const issuer = json.issuer.replace("{tenantid}", tenantId);
       console.log("Modified issuer:", issuer);
       return Response.json({ ...json, issuer });
