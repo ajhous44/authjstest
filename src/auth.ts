@@ -4,16 +4,6 @@ import { ProxyAgent, fetch as undici } from "undici";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import type { MicrosoftEntraIDProfile } from "next-auth/providers/microsoft-entra-id";
 
-type TokenSet = {
-  access_token?: string;
-  token_type?: string;
-  id_token?: string;
-  refresh_token?: string;
-  scope?: string;
-  expires_at?: number;
-  session_state?: string;
-};
-
 const proxyUrl =
   process.env.HTTP_PROXY ||
   process.env.HTTPS_PROXY ||
@@ -61,10 +51,12 @@ const createAzureADProvider = () => {
   const baseConfig = {
     clientId: process.env.AZURE_AD_CLIENT_ID!,
     clientSecret: process.env.AZURE_AD_CLIENT_SECRET!,
-    issuer: `https://login.microsoftonline.com/${process.env.AZURE_AD_TENANT_ID!}/v2.0`,
+    issuer: process.env.AZURE_AD_TENANT_ID 
+      ? `https://login.microsoftonline.com/${process.env.AZURE_AD_TENANT_ID}/v2.0`
+      : undefined,
     authorization: {
       params: {
-        scope: `api://${process.env.AZURE_AD_CLIENT_ID!}/default openid profile email`,
+        scope: "openid profile email User.Read",
       },
     },
     client: {
@@ -101,7 +93,7 @@ const createAzureADProvider = () => {
   };
 
   // Step 3: override profile since it uses fetch without customFetch
-  provider.profile = async (profile: MicrosoftEntraIDProfile, tokens: TokenSet) => {
+  provider.profile = async (profile: MicrosoftEntraIDProfile, tokens: { access_token?: string }) => {
     const profilePhotoSize = 48;
     console.log("Fetching profile photo via proxy");
 
