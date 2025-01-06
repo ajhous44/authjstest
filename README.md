@@ -1,36 +1,95 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Next.js with Microsoft Entra ID Authentication
 
-## Getting Started
+This project demonstrates how to implement Microsoft Entra ID (formerly Azure AD) authentication in a Next.js application using Auth.js v5, with support for corporate proxies.
 
-First, run the development server:
+## Features
 
+- Microsoft Entra ID authentication
+- Corporate proxy support
+- Profile photo fetching
+- Protected routes
+- TypeScript support
+- Tailwind CSS styling
+
+## Prerequisites
+
+1. Node.js 18.17 or later
+2. A Microsoft Entra ID (Azure AD) tenant
+3. A registered application in Microsoft Entra ID
+
+## Setup
+
+1. Clone the repository:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone <repository-url>
+cd <project-directory>
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Install dependencies:
+```bash
+npm install
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+3. Create a `.env.local` file in the root directory with the following variables:
+```env
+AZURE_AD_CLIENT_ID=your_client_id
+AZURE_AD_CLIENT_SECRET=your_client_secret
+AZURE_AD_TENANT_ID=your_tenant_id
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+# Optional: Proxy settings
+# HTTP_PROXY=http://your-proxy:port
+# HTTPS_PROXY=http://your-proxy:port
 
-## Learn More
+# Auth.js secret (Generate with: openssl rand -base64 32)
+AUTH_SECRET=your_auth_secret
+```
 
-To learn more about Next.js, take a look at the following resources:
+4. Configure your Microsoft Entra ID application:
+   - Go to Azure Portal > Azure Active Directory > App registrations
+   - Create or select your application
+   - Add redirect URIs: `http://localhost:3000/api/auth/callback/microsoft-entra-id`
+   - Note down the Application (client) ID and Directory (tenant) ID
+   - Create a client secret and note it down
+   - Configure API permissions (minimum required):
+     - Microsoft Graph API
+       - User.Read
+       - email
+       - openid
+       - profile
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+5. Run the development server:
+```bash
+npm run dev
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+6. Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-## Deploy on Vercel
+## Corporate Proxy Support
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+If your organization uses a corporate proxy, set the proxy environment variables in your `.env.local` file:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```env
+HTTP_PROXY=http://your-proxy:port
+HTTPS_PROXY=http://your-proxy:port
+```
+
+The application will automatically detect and use these proxy settings for all authentication-related requests.
+
+## Project Structure
+
+- `src/app/` - Next.js application routes
+- `src/auth.ts` - Auth.js configuration and Microsoft Entra ID setup
+- `src/middleware.ts` - Route protection middleware
+- `.env.local` - Environment variables
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
