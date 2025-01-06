@@ -1,21 +1,27 @@
-import { auth } from "./auth";
-import { type NextRequest } from "next/server";
+import { getToken } from 'next-auth/jwt';
+import { NextResponse, type NextRequest } from 'next/server';
 
-export default auth((req) => {
-  const { auth: session } = req;
-  const { nextUrl } = req as NextRequest;
+export const runtime = 'nodejs';
+
+export async function middleware(request: NextRequest) {
+  const token = await getToken({
+    req: request,
+    secret: process.env.NEXTAUTH_SECRET,
+  });
 
   // Public paths that don't require authentication
-  const isPublicPath = nextUrl.pathname === "/";
+  const isPublicPath = request.nextUrl.pathname === "/";
 
   // If the user is not logged in and trying to access a protected route,
   // redirect them to the homepage
-  if (!session && !isPublicPath) {
-    return Response.redirect(new URL("/", nextUrl));
+  if (!token && !isPublicPath) {
+    return NextResponse.redirect(new URL("/", request.url));
   }
-});
 
-// Optionally configure middleware to run only on specific paths
+  return NextResponse.next();
+}
+
+// Configure which paths should be handled by middleware
 export const config = {
   matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
 }; 
