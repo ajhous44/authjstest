@@ -9,38 +9,42 @@ const proxyUrl =
   process.env.http_proxy ||
   process.env.https_proxy;
 
-// init proxyFetch function that will be used to route requests through proxy
 async function proxyFetch(
   ...args: Parameters<typeof fetch>
 ): Promise<Response> {
-  console.log(
-    "Proxy called for URL:",
-    args[0] instanceof Request ? args[0].url : args[0]
-  );
+  const url = args[0] instanceof Request ? args[0].url : args[0];
+  console.log(`🔄 Proxy Request: ${url}`);
 
-  const [url, config] = args;
-  const fetchConfig = {
-    ...config,
-    headers: {
-      ...(config?.headers ?? {}),
-      'x-use-proxy': 'true',
-    },
-  };
+  try {
+    const [urlArg, config] = args;
+    const fetchConfig = {
+      ...config,
+      headers: {
+        ...(config?.headers ?? {}),
+        'x-use-proxy': 'true',
+      },
+    };
 
-  return fetch(url, fetchConfig);
+    const response = await fetch(urlArg, fetchConfig);
+    if (!response.ok) {
+      console.error(`❌ Proxy fetch failed for ${url}:`, {
+        status: response.status,
+        statusText: response.statusText
+      });
+    }
+    return response;
+  } catch (error) {
+    console.error(`❌ Proxy error for ${url}:`, error instanceof Error ? error.message : error);
+    throw error;
+  }
 }
 
-/**
- * Creates a Microsoft Entra ID provider configuration and overrides the customFetch.
- */
 const createAzureADProvider = () => {
-  if (!proxyUrl) {
-    console.log("Proxy is not enabled");
-  } else {
-    console.log("Proxy is enabled:", proxyUrl);
+  console.log(`📡 Proxy Status: ${proxyUrl ? 'Enabled' : 'Disabled'}`);
+  if (proxyUrl) {
+    console.log(`📡 Using proxy: ${proxyUrl}`);
   }
 
-  // Step 1: Create the base provider
   const baseConfig = {
     clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID!,
     clientSecret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET!,
@@ -57,44 +61,44 @@ const createAzureADProvider = () => {
 
   const provider = MicrosoftEntraID(baseConfig);
   
-  // if not proxyUrl, return the provider
   if (!proxyUrl) return provider;
 
-  // Step 2: Override the customFetch in the provider
   const customFetch = Symbol.for("auth.js.custom-fetch");
   // @ts-expect-error Provider type doesn't expose symbol indexer
   provider[customFetch] = async (...args: Parameters<typeof fetch>) => {
     const url = new URL(args[0] instanceof Request ? args[0].url : args[0]);
-    console.log("Custom Fetch Intercepted:", url.toString());
+    console.log(`🔑 Auth Request: ${url.toString()}`);
 
-    // Handle `.well-known/openid-configuration` logic
-    if (url.pathname.endsWith(".well-known/openid-configuration")) {
-      console.log("Intercepting .well-known/openid-configuration");
-      const response = await proxyFetch(...args);
-      const json = await response.clone().json();
-      const tenantRe = /microsoftonline\.com\/(\w+)\/v2\.0/;
-      const tenantId = process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER?.match(tenantRe)?.[1] ?? "common";
-      const issuer = json.issuer.replace("{tenantid}", tenantId);
-      console.log("Modified issuer:", issuer);
-      return Response.json({ ...json, issuer });
+    try {
+      if (url.pathname.endsWith(".well-known/openid-configuration")) {
+        console.log(`🔍 Fetching OpenID config`);
+        const response = await proxyFetch(...args);
+        const json = await response.clone().json();
+        const tenantRe = /microsoftonline\.com\/(\w+)\/v2\.0/;
+        const tenantId = process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER?.match(tenantRe)?.[1] ?? "common";
+        const issuer = json.issuer.replace("{tenantid}", tenantId);
+        return Response.json({ ...json, issuer });
+      }
+
+      return proxyFetch(...args);
+    } catch (error) {
+      console.error(`❌ Auth request failed for ${url}:`, error instanceof Error ? error.message : error);
+      throw error;
     }
-
-    // Fallback for all other requests
-    return proxyFetch(...args);
   };
 
-  // Step 3: override profile since it uses fetch without customFetch
   provider.profile = async (profile: MicrosoftEntraIDProfile, tokens: { access_token?: string }) => {
-    const profilePhotoSize = 48;
-    console.log("Fetching profile photo via proxy");
+    console.log(`👤 Fetching user profile`);
 
     let image: string | null = null;
     if (tokens.access_token) {
       try {
-        const response = await proxyFetch(
-          `https://graph.microsoft.com/v1.0/me/photos/${profilePhotoSize}x${profilePhotoSize}/$value`,
-          { headers: { Authorization: `Bearer ${tokens.access_token}` } }
-        );
+        const photoUrl = `https://graph.microsoft.com/v1.0/me/photos/48x48/$value`;
+        console.log(`🖼️ Fetching profile photo: ${photoUrl}`);
+        
+        const response = await proxyFetch(photoUrl, {
+          headers: { Authorization: `Bearer ${tokens.access_token}` }
+        });
 
         if (response.ok && typeof Buffer !== "undefined") {
           const pictureBuffer = await response.arrayBuffer();
@@ -102,7 +106,7 @@ const createAzureADProvider = () => {
           image = `data:image/jpeg;base64,${pictureBase64}`;
         }
       } catch (error) {
-        console.error("Error processing profile photo:", error);
+        console.error(`❌ Profile photo fetch failed:`, error instanceof Error ? error.message : error);
       }
     }
 
