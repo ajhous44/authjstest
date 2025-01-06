@@ -3,6 +3,24 @@ import { type NextAuthConfig } from "next-auth";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import type { MicrosoftEntraIDProfile } from "next-auth/providers/microsoft-entra-id";
 
+// Debug function to safely stringify objects/errors
+function safeStringify(obj: unknown): string {
+  try {
+    return JSON.stringify(obj, (key, value) => {
+      if (value instanceof Error) {
+        return {
+          name: value.name,
+          message: value.message,
+          stack: value.stack,
+        };
+      }
+      return value;
+    }, 2);
+  } catch (err) {
+    return `[Unable to stringify: ${err}]`;
+  }
+}
+
 const proxyUrl =
   process.env.HTTP_PROXY ||
   process.env.HTTPS_PROXY ||
@@ -13,10 +31,15 @@ async function proxyFetch(
   ...args: Parameters<typeof fetch>
 ): Promise<Response> {
   const url = args[0] instanceof Request ? args[0].url : args[0];
-  console.log(`🔄 Proxy Request: ${url}`);
+  console.log(`🔄 Proxy Request Starting:
+  URL: ${url}
+  Args: ${safeStringify(args)}
+  Proxy URL: ${proxyUrl}`);
 
   try {
     const [urlArg, config] = args;
+    console.log(`📝 Request Config: ${safeStringify(config)}`);
+
     const fetchConfig = {
       ...config,
       headers: {
@@ -25,16 +48,33 @@ async function proxyFetch(
       },
     };
 
-    const response = await fetch(urlArg, fetchConfig);
+    console.log(`📝 Final Fetch Config: ${safeStringify(fetchConfig)}`);
+
+    const response = await fetch(urlArg, fetchConfig).catch(error => {
+      console.error(`💥 Fetch Failed:
+        Error Name: ${error.name}
+        Message: ${error.message}
+        Stack: ${error.stack}
+      `);
+      throw error;
+    });
+
     if (!response.ok) {
+      const responseText = await response.text().catch(() => 'Unable to get response text');
       console.error(`❌ Proxy fetch failed for ${url}:`, {
         status: response.status,
-        statusText: response.statusText
+        statusText: response.statusText,
+        headers: Object.fromEntries(response.headers.entries()),
+        body: responseText
       });
     }
     return response;
   } catch (error) {
-    console.error(`❌ Proxy error for ${url}:`, error instanceof Error ? error.message : error);
+    console.error(`❌ Proxy error for ${url}:
+      Type: ${error instanceof Error ? error.constructor.name : typeof error}
+      Message: ${error instanceof Error ? error.message : 'Unknown error'}
+      Stack: ${error instanceof Error ? error.stack : 'No stack trace'}
+    `);
     throw error;
   }
 }
