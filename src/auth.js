@@ -1,14 +1,13 @@
 import NextAuth, { customFetch } from "next-auth"
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id"
-import { ProxyAgent, fetch as undici, type Response as UndiciResponse } from "undici"
+import { ProxyAgent, fetch as undici } from "undici"
 
 // Configure proxy from environment variable
 const proxyUrl = process.env.HTTPS_PROXY ?? "http://my.proxy.server:8080"
 const dispatcher = new ProxyAgent(proxyUrl)
 
 // Enhanced proxy function with detailed logging
-function proxy(...args: Parameters<typeof fetch>): ReturnType<typeof fetch> {
-  const [url, options = {}] = args
+function proxy(url, options = {}) {
   const requestId = Math.random().toString(36).slice(2, 8)
   const isCSRF = url.toString().includes('/csrf')
   const isSignIn = url.toString().includes('/signin') || url.toString().includes('oauth/v2.0/authorize')
@@ -21,19 +20,12 @@ function proxy(...args: Parameters<typeof fetch>): ReturnType<typeof fetch> {
     proxyUrl,
     isCSRF,
     isSignIn,
-    isEntraID,
-    // Log headers except authorization
-    headers: options.headers && Object.fromEntries(
-      Object.entries(new Headers(options.headers))
-        .filter(([key]) => !key.toLowerCase().includes('authorization'))
-        .map(([key, value]) => [key, value])
-    )
+    isEntraID
   })
 
   // Special handling for CSRF requests
   if (isCSRF) {
     console.log(`[Auth:${requestId}] CSRF request detected, bypassing proxy`)
-    // @ts-expect-error undici Response is compatible with fetch Response
     return undici(url, options)
   }
 
@@ -73,9 +65,8 @@ function proxy(...args: Parameters<typeof fetch>): ReturnType<typeof fetch> {
   })
 
   // Make the request and handle the response
-  // @ts-expect-error undici Response is compatible with fetch Response
   return undici(url, fetchOptions)
-    .then((response: UndiciResponse) => {
+    .then(response => {
       // Log response details
       if (!response.ok) {
         console.error(`[Auth:${requestId}] Error:`, {
@@ -154,4 +145,4 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     })
   ],
   debug: true
-})
+}) 
