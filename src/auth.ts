@@ -1,6 +1,6 @@
 import NextAuth, { customFetch } from "next-auth"
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id"
-import { ProxyAgent, fetch as undici } from "undici"
+import { ProxyAgent, fetch as undici, type Response as UndiciResponse } from "undici"
 
 // Configure proxy from environment variable
 const proxyUrl = process.env.HTTPS_PROXY ?? "http://my.proxy.server:8080"
@@ -10,38 +10,57 @@ const dispatcher = new ProxyAgent(proxyUrl)
 function proxy(...args: Parameters<typeof fetch>): ReturnType<typeof fetch> {
   const [url, options = {}] = args
   const requestId = Math.random().toString(36).slice(2, 8)
+  const isCSRF = url.toString().includes('/csrf')
 
   // Log request details (safely)
   console.log(`[Auth:${requestId}] Request:`, {
     url: url.toString().replace(/[?#].*$/, ''), // Remove sensitive query params
     method: options.method || 'GET',
     proxyUrl,
+    isCSRF,
     // Log headers except authorization
     headers: options.headers && Object.fromEntries(
       Object.entries(new Headers(options.headers))
         .filter(([key]) => !key.toLowerCase().includes('authorization'))
         .map(([key, value]) => [key, value])
-    ),
-    // Log proxy configuration
-    proxy: {
-      url: proxyUrl,
-      agent: 'undici/ProxyAgent',
-      options: {
-        keepAlive: true,
-        keepAliveMsecs: 1000,
-        maxSockets: 256
-      }
-    }
+    )
   })
 
-  // @ts-expect-error undici has additional options
-  return undici(url, { 
-    ...options, 
+  // Special handling for CSRF requests
+  if (isCSRF) {
+    console.log(`[Auth:${requestId}] CSRF request detected, bypassing proxy`)
+    // @ts-expect-error undici Response is compatible with fetch Response
+    return undici(url, options)
+  }
+
+  // Prepare fetch options with proxy
+  const fetchOptions = {
+    ...options,
     dispatcher,
     duplex: 'half',  // Required for some HTTPS requests
     keepalive: true,
-    timeout: 30000   // 30 second timeout
-  }).then(response => {
+    timeout: 30000,   // 30 second timeout
+    // Additional headers for proxy
+    headers: new Headers({
+      ...options.headers,
+      'Connection': 'keep-alive',
+      'Proxy-Connection': 'keep-alive'
+    })
+  }
+
+  // Log complete request configuration
+  console.log(`[Auth:${requestId}] Request Config:`, {
+    url: url.toString().replace(/[?#].*$/, ''),
+    method: fetchOptions.method || 'GET',
+    proxy: {
+      url: proxyUrl,
+      agent: 'undici/ProxyAgent',
+      timeout: fetchOptions.timeout
+    }
+  })
+
+  // @ts-expect-error undici Response is compatible with fetch Response
+  return undici(url, fetchOptions).then((response: UndiciResponse) => {
     // Log response details
     if (!response.ok) {
       console.error(`[Auth:${requestId}] Error:`, {
@@ -70,7 +89,7 @@ function proxy(...args: Parameters<typeof fetch>): ReturnType<typeof fetch> {
     }
     return response
   }).catch(error => {
-    // Enhanced error logging
+    // Enhanced error logging with proxy details
     const errorDetails = {
       name: error.name,
       message: error.message,
@@ -83,7 +102,16 @@ function proxy(...args: Parameters<typeof fetch>): ReturnType<typeof fetch> {
       syscall: error.syscall,
       hostname: error.hostname,
       type: error.type,
-      phase: error.phase
+      phase: error.phase,
+      // Additional proxy-specific details
+      proxyConfig: {
+        keepalive: fetchOptions.keepalive,
+        timeout: fetchOptions.timeout,
+        headers: Object.fromEntries(
+          Array.from(new Headers(fetchOptions.headers).entries())
+            .filter(([key]) => !key.toLowerCase().includes('authorization'))
+        )
+      }
     }
     console.error(`[Auth:${requestId}] Proxy Error:`, errorDetails)
     throw error
