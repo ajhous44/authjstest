@@ -11,6 +11,8 @@ function proxy(...args: Parameters<typeof fetch>): ReturnType<typeof fetch> {
   const [url, options = {}] = args
   const requestId = Math.random().toString(36).slice(2, 8)
   const isCSRF = url.toString().includes('/csrf')
+  const isSignIn = url.toString().includes('/signin') || url.toString().includes('oauth/v2.0/authorize')
+  const isEntraID = url.toString().includes('login.microsoftonline.com')
 
   // Log request details (safely)
   console.log(`[Auth:${requestId}] Request:`, {
@@ -18,6 +20,8 @@ function proxy(...args: Parameters<typeof fetch>): ReturnType<typeof fetch> {
     method: options.method || 'GET',
     proxyUrl,
     isCSRF,
+    isSignIn,
+    isEntraID,
     // Log headers except authorization
     headers: options.headers && Object.fromEntries(
       Object.entries(new Headers(options.headers))
@@ -48,6 +52,15 @@ function proxy(...args: Parameters<typeof fetch>): ReturnType<typeof fetch> {
     })
   }
 
+  // For Entra ID requests, ensure we have the right headers
+  if (isEntraID) {
+    fetchOptions.headers.set('Accept', 'application/json')
+    if (isSignIn) {
+      fetchOptions.headers.set('Cache-Control', 'no-cache')
+      fetchOptions.headers.set('Pragma', 'no-cache')
+    }
+  }
+
   // Log complete request configuration
   console.log(`[Auth:${requestId}] Request Config:`, {
     url: url.toString().replace(/[?#].*$/, ''),
@@ -59,63 +72,66 @@ function proxy(...args: Parameters<typeof fetch>): ReturnType<typeof fetch> {
     }
   })
 
+  // Make the request and handle the response
   // @ts-expect-error undici Response is compatible with fetch Response
-  return undici(url, fetchOptions).then((response: UndiciResponse) => {
-    // Log response details
-    if (!response.ok) {
-      console.error(`[Auth:${requestId}] Error:`, {
-        status: response.status,
-        statusText: response.statusText,
-        url: response.url.replace(/[?#].*$/, ''),
-        headers: Object.fromEntries(response.headers.entries())
-      })
-      // Clone and log response body for debugging
-      response.clone().text().then(text => {
-        try {
-          console.error(`[Auth:${requestId}] Error Body:`, JSON.parse(text))
-        } catch {
-          console.error(`[Auth:${requestId}] Error Body:`, text)
-        }
-      }).catch(e => console.error(`[Auth:${requestId}] Could not read error body:`, e))
-    } else {
-      console.log(`[Auth:${requestId}] Success:`, {
-        status: response.status,
-        url: response.url.replace(/[?#].*$/, ''),
-        headers: Object.fromEntries(
-          Array.from(response.headers.entries())
-            .filter(([key]) => !key.toLowerCase().includes('authorization'))
-        )
-      })
-    }
-    return response
-  }).catch(error => {
-    // Enhanced error logging with proxy details
-    const errorDetails = {
-      name: error.name,
-      message: error.message,
-      cause: error.cause,
-      stack: error.stack?.split('\n'),
-      url: url.toString().replace(/[?#].*$/, ''),
-      proxyUrl,
-      code: error.code,
-      errno: error.errno,
-      syscall: error.syscall,
-      hostname: error.hostname,
-      type: error.type,
-      phase: error.phase,
-      // Additional proxy-specific details
-      proxyConfig: {
-        keepalive: fetchOptions.keepalive,
-        timeout: fetchOptions.timeout,
-        headers: Object.fromEntries(
-          Array.from(new Headers(fetchOptions.headers).entries())
-            .filter(([key]) => !key.toLowerCase().includes('authorization'))
-        )
+  return undici(url, fetchOptions)
+    .then((response: UndiciResponse) => {
+      // Log response details
+      if (!response.ok) {
+        console.error(`[Auth:${requestId}] Error:`, {
+          status: response.status,
+          statusText: response.statusText,
+          url: response.url.replace(/[?#].*$/, ''),
+          headers: Object.fromEntries(response.headers.entries())
+        })
+        // Clone and log response body for debugging
+        response.clone().text().then(text => {
+          try {
+            console.error(`[Auth:${requestId}] Error Body:`, JSON.parse(text))
+          } catch {
+            console.error(`[Auth:${requestId}] Error Body:`, text)
+          }
+        }).catch(e => console.error(`[Auth:${requestId}] Could not read error body:`, e))
+      } else {
+        console.log(`[Auth:${requestId}] Success:`, {
+          status: response.status,
+          url: response.url.replace(/[?#].*$/, ''),
+          headers: Object.fromEntries(
+            Array.from(response.headers.entries())
+              .filter(([key]) => !key.toLowerCase().includes('authorization'))
+          )
+        })
       }
-    }
-    console.error(`[Auth:${requestId}] Proxy Error:`, errorDetails)
-    throw error
-  })
+      return response
+    })
+    .catch(error => {
+      // Enhanced error logging with proxy details
+      const errorDetails = {
+        name: error.name,
+        message: error.message,
+        cause: error.cause,
+        stack: error.stack?.split('\n'),
+        url: url.toString().replace(/[?#].*$/, ''),
+        proxyUrl,
+        code: error.code,
+        errno: error.errno,
+        syscall: error.syscall,
+        hostname: error.hostname,
+        type: error.type,
+        phase: error.phase,
+        // Additional proxy-specific details
+        proxyConfig: {
+          keepalive: fetchOptions.keepalive,
+          timeout: fetchOptions.timeout,
+          headers: Object.fromEntries(
+            Array.from(new Headers(fetchOptions.headers).entries())
+              .filter(([key]) => !key.toLowerCase().includes('authorization'))
+          )
+        }
+      }
+      console.error(`[Auth:${requestId}] Proxy Error:`, errorDetails)
+      throw error
+    })
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
